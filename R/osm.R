@@ -34,17 +34,19 @@ oc_load_osm <- function(con = oc_connect()) {
 
 #' @keywords internal
 oc_osm_combine <- function(res) {
-  parts <- list(res$osm_points, res$osm_lines, res$osm_polygons)
-  parts <- Filter(function(x) !is.null(x) && nrow(x) > 0, parts)
-  if (!length(parts)) return(NULL)
-  # Reduce every part to a common (name, geometry) schema so the heterogeneous
-  # point/line/polygon tag columns rbind cleanly. Some parts (e.g. unnamed nodes)
-  # carry no `name` column at all, so synthesize an NA one before selecting —
-  # otherwise x["name"] errors with "undefined columns selected".
-  do.call(rbind, lapply(parts, function(x) {
-    if (!"name" %in% names(x)) x[["name"]] <- NA_character_
-    x["name"]
-  }))
+  # Return a SINGLE geometry type, preferring polygons > lines > points (the
+  # dominant geometry for each OSM theme). Mixing types into one sf gives a
+  # GEOMETRY-typed column, which the frontend's geom_kind() can't classify, so
+  # every such layer falls through to circle markers. Reduce to (name, geometry);
+  # some parts (e.g. unnamed nodes) carry no `name` column, so synthesize an NA
+  # one before selecting — otherwise x["name"] errors with "undefined columns".
+  for (part in list(res$osm_polygons, res$osm_lines, res$osm_points)) {
+    if (!is.null(part) && nrow(part) > 0) {
+      if (!"name" %in% names(part)) part[["name"]] <- NA_character_
+      return(part["name"])
+    }
+  }
+  NULL
 }
 
 #' Every-business point layer (comprehensive OSM commercial tags).
@@ -62,5 +64,13 @@ oc_load_businesses_osm <- function(con = oc_connect()) {
   }
   feats <- Filter(Negate(is.null), feats)
   biz <- if (length(feats)) do.call(rbind, feats) else NULL
+  # Different keys can now yield different dominant geometries (a shop may be a
+  # building polygon, an amenity a node); collapse to centroids so the business
+  # layer is uniformly POINT rather than a mixed GEOMETRY column.
+  if (!is.null(biz) && nrow(biz)) {
+    old <- sf::sf_use_s2(FALSE)
+    biz <- tryCatch(sf::st_centroid(biz), error = function(e) biz)
+    sf::sf_use_s2(old)
+  }
   oc_write_layer(biz, "business", "osm_businesses", "OpenStreetMap", "bbox", con)
 }
