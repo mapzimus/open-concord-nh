@@ -16,6 +16,19 @@ SD**, demographics, biodiversity, knowledge), loads each into PostGIS tagged
 > [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) to run it on your machine and
 > [`docs/VALIDATION_LOG.md`](docs/VALIDATION_LOG.md) to check off each dataset.
 
+## Architecture
+
+```
+ R package (openconcord)        live queries           R Shiny app
+ ┌─────────────────────┐      ┌──────────────┐      ┌──────────────────┐
+ │ targets::tar_make() │ ───► │   PostGIS    │ ◄─── │  shiny/app.R     │
+ │  oc_load_concord()  │ ETL  │  + catalog   │      │  bslib + mapgl   │
+ │  oc_load_external() │      │  165 layers  │      │  (MapLibre GL)   │
+ │  oc_load_apis() ... │      └──────────────┘      └────────┬─────────┘
+ └─────────────────────┘                                     │ Caddy TLS
+                                                  concord.maxwellhowegis.com
+```
+
 ## Stack
 
 | Concern | Package |
@@ -53,10 +66,25 @@ targets::tar_make()                          # download -> PostGIS -> web export
 openconcord::oc_load_schools()
 ```
 
+## Data sources
+
+| Source | Schema | What | License |
+|---|---|---|---|
+| City of Concord ArcGIS | `city` | ~91 layers: parcels, zoning, infrastructure | Public records |
+| Federal / state ArcGIS | `external` | USA Structures, conservation, FEMA, historic | Public domain / open |
+| OpenStreetMap | `osm`, `business` | roads, buildings, POIs, businesses | ODbL |
+| US Census ACS + TIGER | `apis`, `schools` | demographics, tracts, school districts | Public domain |
+| CDC PLACES | `apis` | tract-level health indicators | Public domain |
+| EPA FRS · USGS · NWS | `apis` | facilities, streamgages, earthquakes, alerts | Public domain |
+| GBIF · iNaturalist | `apis` | biodiversity occurrences | CC-BY / CC0 |
+| Wikidata · Wikipedia | `knowledge` | notable people, facts, history | CC0 / CC-BY-SA |
+
+Each load is recorded in `public.catalog` with a `validated` flag.
+
 ## Self-hosting (R end-to-end)
 
 Everything is R: the ETL loads PostGIS and an **R Shiny app** (`shiny/app.R`,
-leaflet + sf + pool) is the frontend, querying PostGIS live. Both run on your
+bslib + mapgl + sf + pool) is the frontend, querying PostGIS live. Both run on your
 **VPS** via `docker compose up -d` (PostGIS + Shiny + Caddy TLS — see
 [`DEPLOY.md`](DEPLOY.md)). The app is served at `concord.maxwellhowegis.com` and
 embedded at `maxwellhowegis.com/concord/` (GitHub Pages is static, so it iframes
@@ -74,3 +102,17 @@ See [`DEPLOY.md`](DEPLOY.md) for the full VPS + PostGIS + static-publish setup.
   (flip `catalog.validated`) per `docs/MEGA_MAP_SPEC.md`.
 - `mapgl`-based styling per geometry/attribute; choropleths from `db` joins
   (e.g. ACS income on tracts, enrollment on school points).
+
+## Known limitations
+
+- The map is **empty until the ETL has run** (`targets::tar_make()` or a per-group
+  `oc_load_*()`); the frontend reads PostGIS live, it ships no bundled data.
+- A few upstreams are flaky on first run — FEMA NFHL (500s), SSURGO / NCED
+  (503/timeout), and `developer.nrel.gov` (blocked on some networks). Re-run the
+  affected group; each `oc_*()` skips cleanly on failure rather than aborting.
+- Key-gated sources (AirNow, PurpleAir, OpenAQ, FIRMS, Mapillary) are skipped
+  unless their `*_API_KEY` env var is set; ACS needs `CENSUS_API_KEY`.
+
+## License
+
+MIT © Max Howe. See [`LICENSE`](LICENSE).

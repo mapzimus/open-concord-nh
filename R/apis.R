@@ -31,6 +31,7 @@ oc_load_apis <- function(con = oc_connect(), include_keyed = FALSE) {
   oc_load_census(con)
   oc_api_epa_frs(con)
   oc_api_cdc_places(con)
+  oc_api_cdc_places_tracts(con)
   oc_api_usgs_streamgages(con)
   oc_api_lodes(con)
   oc_api_nrel_ev(con)
@@ -159,6 +160,24 @@ oc_api_cdc_places <- function(con = oc_connect()) {
   recs$lat <- vapply(coords, function(c) if (length(c)) c[[2]] else NA_real_, numeric(1))
   recs$geolocation <- NULL
   oc_write_layer(oc_points_sf(recs), "apis", "cdc_places", "CDC PLACES", "county", con)
+}
+
+#' CDC PLACES tract polygons (wide format, ArcGIS) -> map+db.
+#'
+#' The point layer from [oc_api_cdc_places()] is long-format and not suited to a
+#' choropleth. This pulls the wide-format census-tract polygons (one row per
+#' tract, one column per health measure, e.g. `MHLTH_CrudePrev`) that the Shiny
+#' frontend's thematic overlay expects as `apis.cdc_places_tracts_poly`.
+#' @param con A DBI connection.
+#' @export
+oc_api_cdc_places_tracts <- function(con = oc_connect()) {
+  url <- paste0("https://services3.arcgis.com/ZvidGQkLaDJxRSJ2/arcgis/rest/services/",
+                "PLACES_LocalData_for_BetterHealth/FeatureServer/3")
+  g <- tryCatch(oc_arc_layer(url, bbox = oc_bbox_sf(region = TRUE)),
+                error = function(e) {
+                  cli::cli_alert_danger("CDC PLACES tracts: {conditionMessage(e)}"); NULL
+                })
+  oc_write_layer(g, "apis", "cdc_places_tracts_poly", "CDC PLACES 2023 (ArcGIS)", "county", con)
 }
 
 #' USGS NWIS active stream sites in Merrimack County -> map+db points.
@@ -314,8 +333,8 @@ oc_api_mapillary <- function(con = oc_connect()) {
   res <- d$data
   if (is.null(res) || !NROW(res)) return(invisible(FALSE))
   coords <- res$geometry$coordinates
-  res$lon <- vapply(coords, function(c) c[[1]], numeric(1))
-  res$lat <- vapply(coords, function(c) c[[2]], numeric(1))
+  res$lon <- vapply(coords, function(c) if (length(c) >= 2) c[[1]] else NA_real_, numeric(1))
+  res$lat <- vapply(coords, function(c) if (length(c) >= 2) c[[2]] else NA_real_, numeric(1))
   res$geometry <- NULL
   oc_write_layer(oc_points_sf(res), "apis", "mapillary", "Mapillary", "bbox", con)
 }

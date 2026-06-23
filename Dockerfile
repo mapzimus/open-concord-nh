@@ -1,8 +1,9 @@
 # Open Concord Shiny frontend (R). Built on rocker/geospatial (GDAL/GEOS/PROJ + sf).
 FROM rocker/geospatial:4.4
 
+# v3 frontend uses {bslib}+{mapgl}; {leaflet} only by the legacy app-leaflet-v1.R.
 RUN install2.r --error --skipinstalled \
-      shiny leaflet leaflet.extras pool RPostgres jsonlite
+      shiny bslib mapgl pool RPostgres httr2 jsonlite htmlwidgets sf
 
 WORKDIR /app
 COPY shiny/app.R /app/app.R

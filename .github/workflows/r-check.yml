@@ -1,0 +1,47 @@
+name: R check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Two of the package's Imports (WikidataQueryServiceR, WikipediR) are archived on
+# CRAN, so a full `R CMD check` can't resolve the dependency tree on a clean
+# runner. This workflow gates what runs reliably without the heavy/archived
+# stack: every R/ source is parsed (catches syntax errors), the offline config
+# tests run, and lintr reports style issues informationally.
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
+          use-public-rspm: true
+
+      - name: Install lint/test tooling
+        run: install.packages(c("lintr", "testthat"))
+        shell: Rscript {0}
+
+      - name: Parse all R sources (syntax check)
+        run: |
+          files <- list.files("R", pattern = "[.]R$", full.names = TRUE)
+          for (f in files) {
+            tryCatch(parse(f), error = function(e)
+              stop(sprintf("Syntax error in %s: %s", f, conditionMessage(e))))
+          }
+          cat("Parsed", length(files), "R sources OK\n")
+        shell: Rscript {0}
+
+      - name: Offline config tests
+        run: |
+          source("R/config.R")
+          testthat::test_dir("tests/testthat", stop_on_failure = TRUE)
+        shell: Rscript {0}
+
+      - name: lintr (informational)
+        continue-on-error: true
+        run: print(lintr::lint_dir("R"))
+        shell: Rscript {0}
